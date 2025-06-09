@@ -1,0 +1,261 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'Teams Greeting Bot - Serverless deployment on AWS Lambda'
+
+# Global configuration
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.11
+    Environment:
+      Variables:
+        POWERTOOLS_SERVICE_NAME: teams-greeting-bot
+        POWERTOOLS_METRICS_NAMESPACE: TeamsBot
+        LOG_LEVEL: INFO
+
+# Parameters for configuration
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Environment name
+  
+  MicrosoftAppId:
+    Type: String
+    Description: Microsoft Bot Framework App ID
+    NoEcho: true
+  
+  MicrosoftAppPassword:
+    Type: String
+    Description: Microsoft Bot Framework App Password
+    NoEcho: true
+  
+  MicrosoftAppTenantId:
+    Type: String
+    Description: Microsoft Azure Tenant ID
+    NoEcho: true
+  
+  GraphClientId:
+    Type: String
+    Description: Microsoft Graph Client ID
+    NoEcho: true
+  
+  GraphClientSecret:
+    Type: String
+    Description: Microsoft Graph Client Secret
+    NoEcho: true
+  
+  OpenAIApiKey:
+    Type: String
+    Description: OpenAI API Key
+    NoEcho: true
+
+# Resources
+Resources:
+  
+  # Lambda function for the Teams bot
+  TeamsGreetingBotFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'teams-greeting-bot-${Environment}'
+      CodeUri: .
+      Handler: lambda_handler.lambda_handler
+      Description: 'Microsoft Teams bot that greets meeting participants'
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          MICROSOFT_APP_ID: !Ref MicrosoftAppId
+          MICROSOFT_APP_PASSWORD: !Ref MicrosoftAppPassword
+          MICROSOFT_APP_TENANT_ID: !Ref MicrosoftAppTenantId
+          GRAPH_CLIENT_ID: !Ref GraphClientId
+          GRAPH_CLIENT_SECRET: !Ref GraphClientSecret
+          OPENAI_API_KEY: !Ref OpenAIApiKey
+          HOST: '0.0.0.0'
+          PORT: 8000
+          DEBUG: !If [IsDev, 'true', 'false']
+          BOT_NAME: 'TeamsGreetingBot'
+          DEFAULT_GREETING_LANGUAGE: 'pt-BR'
+      Events:
+        BotWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamsGreetingBotApi
+            Path: /api/bot/messages
+            Method: post
+        HealthCheck:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamsGreetingBotApi
+            Path: /health
+            Method: get
+        StatusCheck:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamsGreetingBotApi
+            Path: /api/bot/status
+            Method: get
+        TestGreeting:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamsGreetingBotApi
+            Path: /api/bot/test/greeting
+            Method: post
+        CatchAll:
+          Type: Api
+          Properties:
+            RestApiId: !Ref TeamsGreetingBotApi
+            Path: /{proxy+}
+            Method: ANY
+      Policies:
+        - CloudWatchLogsFullAccess
+        - XRayDacWriteOnlyAccess
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref BotSecretsSecret
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt DeadLetterQueue.Arn
+      ReservedConcurrencyLimit: 10
+      Tracing: Active
+
+  # API Gateway for the bot
+  TeamsGreetingBotApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub 'teams-greeting-bot-api-${Environment}'
+      StageName: !Ref Environment
+      Description: 'API Gateway for Teams Greeting Bot'
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+        MaxAge: "'600'"
+      TracingEnabled: true
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiGatewayLogGroup.Arn
+        Format: >-
+          {
+            "requestId":"$context.requestId",
+            "ip":"$context.identity.sourceIp",
+            "requestTime":"$context.requestTime",
+            "httpMethod":"$context.httpMethod",
+            "routeKey":"$context.routeKey",
+            "status":"$context.status",
+            "protocol":"$context.protocol",
+            "responseLength":"$context.responseLength",
+            "responseTime":"$context.responseTime",
+            "integrationTime":"$context.integration.latency",
+            "userAgent":"$context.identity.userAgent"
+          }
+
+  # CloudWatch Log Group for API Gateway
+  ApiGatewayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/teams-greeting-bot-${Environment}'
+      RetentionInDays: 14
+
+  # CloudWatch Log Group for Lambda
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/teams-greeting-bot-${Environment}'
+      RetentionInDays: 14
+
+  # Dead Letter Queue for failed Lambda executions
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'teams-greeting-bot-dlq-${Environment}'
+      MessageRetentionPeriod: 1209600  # 14 days
+      KmsMasterKeyId: alias/aws/sqs
+
+  # Secrets Manager for storing sensitive configuration
+  BotSecretsSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub 'teams-greeting-bot-secrets-${Environment}'
+      Description: 'Secrets for Teams Greeting Bot'
+      SecretString: !Sub |
+        {
+          "MICROSOFT_APP_ID": "${MicrosoftAppId}",
+          "MICROSOFT_APP_PASSWORD": "${MicrosoftAppPassword}",
+          "MICROSOFT_APP_TENANT_ID": "${MicrosoftAppTenantId}",
+          "GRAPH_CLIENT_ID": "${GraphClientId}",
+          "GRAPH_CLIENT_SECRET": "${GraphClientSecret}",
+          "OPENAI_API_KEY": "${OpenAIApiKey}"
+        }
+
+  # CloudWatch Dashboard for monitoring
+  TeamsGreetingBotDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub 'teams-greeting-bot-${Environment}'
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${TeamsGreetingBotFunction}" ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${TeamsGreetingBotFunction}" ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${TeamsGreetingBotFunction}" ]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "Lambda Metrics"
+              }
+            },
+            {
+              "type": "log",
+              "x": 0,
+              "y": 6,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '/aws/lambda/${TeamsGreetingBotFunction}'\n| fields @timestamp, @message\n| sort @timestamp desc\n| limit 20",
+                "region": "${AWS::Region}",
+                "title": "Recent Logs"
+              }
+            }
+          ]
+        }
+
+# Conditions
+Conditions:
+  IsDev: !Equals [!Ref Environment, 'dev']
+
+# Outputs
+Outputs:
+  ApiGatewayUrl:
+    Description: 'API Gateway endpoint URL'
+    Value: !Sub 'https://${TeamsGreetingBotApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiGatewayUrl'
+  
+  BotWebhookUrl:
+    Description: 'Bot webhook URL for Microsoft Teams'
+    Value: !Sub 'https://${TeamsGreetingBotApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/api/bot/messages'
+    Export:
+      Name: !Sub '${AWS::StackName}-BotWebhookUrl'
+  
+  LambdaFunctionArn:
+    Description: 'Lambda function ARN'
+    Value: !GetAtt TeamsGreetingBotFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaFunctionArn'
+  
+  DashboardUrl:
+    Description: 'CloudWatch Dashboard URL'
+    Value: !Sub 'https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${TeamsGreetingBotDashboard}' 
