@@ -1,0 +1,80 @@
+# SAM configuration file for Teams Greeting Bot
+
+version = 0.1
+
+[default]
+[default.global]
+[default.global.parameters]
+stack_name = "teams-greeting-bot"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+disable_rollback = true
+parameter_overrides = [
+    "Environment=dev"
+]
+
+[default.build]
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate]
+[default.validate.parameters]
+lint = true
+
+[default.deploy]
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+fail_on_empty_changeset = false
+stack_name = "teams-greeting-bot"
+
+[default.package]
+[default.package.parameters]
+resolve_s3 = true
+
+[default.sync]
+[default.sync.parameters]
+watch = true
+
+[default.local_start_api]
+[default.local_start_api.parameters]
+warm_containers = "EAGER"
+
+[default.local_start_lambda]
+[default.local_start_lambda.parameters]
+warm_containers = "EAGER"
+
+# Production environment
+[production]
+[production.global]
+[production.global.parameters]
+stack_name = "teams-greeting-bot-prod"
+region = "us-east-1"
+parameter_overrides = [
+    "Environment=prod"
+]
+
+[production.deploy]
+[production.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+fail_on_empty_changeset = false
+stack_name = "teams-greeting-bot-prod"
+
+# Microsoft Bot Framework
+MICROSOFT_APP_ID=seu_app_id_aqui
+MICROSOFT_APP_PASSWORD=sua_password_aqui
+MICROSOFT_APP_TENANT_ID=seu_tenant_id_aqui
+
+# Microsoft Graph API
+GRAPH_CLIENT_ID=seu_graph_client_id_aqui
+GRAPH_CLIENT_SECRET=seu_graph_secret_aqui
+
+# OpenAI
+OPENAI_API_KEY=sua_chave_openai_aqui
+
+# Opcionais (têm valores padrão)
+BOT_NAME=TeamsGreetingBot
+DEFAULT_GREETING_LANGUAGE=pt-BR 
