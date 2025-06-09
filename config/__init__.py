@@ -1,0 +1,1 @@
+# Configuration module for Teams Greeting Bot 
